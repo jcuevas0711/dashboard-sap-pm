@@ -112,6 +112,9 @@ def fetch_excel(key: str, url: str):
     try:
         r = requests.get(direct, headers=headers, timeout=30, allow_redirects=True)
         if r.status_code == 200 and len(r.content) > 1000:
+            # IP24 necesita tipos mixtos para detectar órdenes numéricas
+            if key == "IP24":
+                return pd.read_excel(io.BytesIO(r.content))
             return pd.read_excel(io.BytesIO(r.content), dtype=str)
         else:
             return None
@@ -137,9 +140,24 @@ def process_avisos(df):
 
 def process_ip24(df):
     df = df.copy(); df.columns = df.columns.str.strip()
-    df["ConOrden"] = df["Orden"].apply(
-        lambda x: bool(x) and str(x).strip() not in ["","nan","0","NaN"])
-    df["Fecha"]    = pd.to_datetime(df.get("Fe.inic.progr.", ""), errors="coerce")
+    # Buscar columna Orden con nombres alternativos
+    orden_col = None
+    for c in df.columns:
+        if "orden" in c.lower() or "order" in c.lower():
+            orden_col = c
+            break
+    if orden_col:
+        df["ConOrden"] = df[orden_col].apply(
+            lambda x: not pd.isna(x) and str(x).strip() not in ["","nan","0","NaN","None"])
+    else:
+        df["ConOrden"] = False
+    # Buscar columna fecha programada
+    fecha_col = None
+    for c in df.columns:
+        if "progr" in c.lower() or "fecha" in c.lower():
+            fecha_col = c
+            break
+    df["Fecha"]    = pd.to_datetime(df[fecha_col], errors="coerce") if fecha_col else pd.NaT
     df["DiasVenc"] = df["Fecha"].apply(days_diff)
     return df
 
