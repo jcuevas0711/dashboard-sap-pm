@@ -3,7 +3,6 @@ import pandas as pd
 import datetime
 import requests
 import io
-import base64
 
 st.set_page_config(
     page_title="Dashboard KPI — SAP PM",
@@ -25,6 +24,23 @@ st.markdown("""
     .stTabs [aria-selected="true"] { color: #1e3a5f !important; }
 </style>
 """, unsafe_allow_html=True)
+
+# ── Links OneDrive (hardcodeados — solo cambia el token ?e=xxx cuando expire) ─
+# Para actualizar: clic derecho en el archivo → Copiar vínculo → reemplaza la URL
+LINKS = {
+    "Ordenes": "https://jicohen0-my.sharepoint.com/:x:/g/personal/joshua_cuevas_jicohen_com/IQCcBs99l8QNQ4Mh3uLbzwJwAVinpfd6pkiarPfltdjZ8wo?e=ax1zXw",
+    "IP16":    "https://jicohen0-my.sharepoint.com/:x:/g/personal/joshua_cuevas_jicohen_com/IQCJsEVvFTqUT6G2VedW8VwgAdu-B02NPslacZN2qhG7HYs?e=zjJGZj",
+    "IP24":    "https://jicohen0-my.sharepoint.com/:x:/g/personal/joshua_cuevas_jicohen_com/IQCcLhYvuBPwR4fxawng5SWZASN2J4xxAHvrir8IcqFKZQI?e=Y7bX9I",
+    "Avisos":  "https://jicohen0-my.sharepoint.com/:x:/g/personal/joshua_cuevas_jicohen_com/IQDbgjL7PhCuR6V2I_51TBuqAUi_fRyQbb1GlzFn7eEgQ1I?e=ZQqhsw",
+}
+
+def sp_download_url(share_url):
+    """Convierte link compartido de SharePoint a URL de descarga directa."""
+    base = share_url.split("?")[0]
+    token = ""
+    if "?e=" in share_url:
+        token = "&e=" + share_url.split("?e=")[1]
+    return base + "?download=1" + token
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 EMPRESA_MAP = {
@@ -85,30 +101,21 @@ def days_diff(fecha):
     except:
         return None
 
-def sharepoint_to_direct(share_url):
-    """Convierte link de SharePoint/OneDrive a URL de descarga directa."""
-    share_url = str(share_url).strip()
-    # Método 1: usar la API de OneDrive shares
-    encoded = base64.b64encode(share_url.encode()).decode()
-    encoded = encoded.rstrip("=").replace("/", "_").replace("+", "-")
-    return f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
-
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_excel(url: str, label: str):
-    """Descarga Excel desde URL directa de OneDrive."""
-    if not url or not url.strip():
-        return None
+def fetch_excel(key: str, url: str):
+    """Descarga Excel desde SharePoint."""
+    direct = sp_download_url(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*",
+    }
     try:
-        direct = sharepoint_to_direct(url)
-        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(direct, headers=headers, timeout=30, allow_redirects=True)
-        if r.status_code == 200:
+        if r.status_code == 200 and len(r.content) > 1000:
             return pd.read_excel(io.BytesIO(r.content), dtype=str)
         else:
-            st.warning(f"⚠️ {label}: HTTP {r.status_code}")
             return None
-    except Exception as e:
-        st.warning(f"⚠️ Error cargando {label}: {str(e)[:100]}")
+    except Exception:
         return None
 
 def process_ordenes(df):
@@ -136,93 +143,77 @@ def process_ip24(df):
     df["DiasVenc"] = df["Fecha"].apply(days_diff)
     return df
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## ⚙️ Configuración")
-    st.markdown("---")
-    st.markdown("### 🔗 Links de OneDrive")
-    st.markdown("""Para cada archivo: clic derecho → **Compartir** → 
-    **Cualquier persona con vínculo** → Copiar""")
-
-    url_av  = st.text_input("🔔 Avisos.xlsx",   placeholder="https://jicohen0-my.sharepoint.com/...")
-    url_ord = st.text_input("🔧 Ordenes.xlsx",  placeholder="https://jicohen0-my.sharepoint.com/...")
-    url_16  = st.text_input("📋 IP16.xlsx",     placeholder="https://jicohen0-my.sharepoint.com/...")
-    url_24  = st.text_input("📅 IP24.xlsx",     placeholder="https://jicohen0-my.sharepoint.com/...")
-
-    cargar = st.button("🔄 Cargar / Actualizar", type="primary", use_container_width=True)
-    if cargar:
-        st.cache_data.clear()
-        st.rerun()
-
-    st.markdown("---")
-    st.caption(f"📅 {datetime.datetime.today().strftime('%d/%m/%Y %H:%M')}")
-    st.caption("Cache: 5 minutos")
-
 # ── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style='background:linear-gradient(135deg,#0f2443,#1e3a5f,#1a4f7a);
      padding:20px 28px;border-radius:12px;margin-bottom:20px;
      box-shadow:0 4px 20px rgba(0,0,0,0.2)'>
-  <div style='font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;
-       text-transform:uppercase'>SAP Plant Maintenance</div>
+  <div style='font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;text-transform:uppercase'>
+    SAP Plant Maintenance</div>
   <h1 style='margin:4px 0 0;color:white;font-size:1.6rem;font-weight:800'>
-    📋 Dashboard KPI — Mantenimiento
-  </h1>
+    📋 Dashboard KPI — Mantenimiento</h1>
   <div style='font-size:12px;color:rgba(255,255,255,0.5);margin-top:4px'>
-    Datos desde OneDrive · Se actualiza automáticamente cada 5 minutos
-  </div>
+    Datos desde OneDrive · Se actualiza automáticamente cada 5 minutos</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── CARGAR ────────────────────────────────────────────────────────────────────
-any_url = any([url_av, url_ord, url_16, url_24])
-
-if not any_url:
-    st.markdown("""
-    <div style='text-align:center;padding:60px 20px;color:#64748B'>
-        <div style='font-size:64px'>📊</div>
-        <h2 style='color:#1e3a5f;margin-top:12px'>Configura los links de OneDrive</h2>
-        <p style='max-width:520px;margin:8px auto;line-height:1.6'>
-            En el panel lateral izquierdo, pega los links compartidos de cada 
-            archivo Excel. El dashboard se genera automáticamente.
-        </p>
-        <div style='background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;
-             padding:16px 24px;max-width:480px;margin:20px auto;text-align:left;font-family:monospace'>
-            📁 Dashboard-SAP-PM/<br>
-            ├── Avisos.xlsx &nbsp;&nbsp;&nbsp;← IW29<br>
-            ├── Ordenes.xlsx ← IW38<br>
-            ├── IP16.xlsx &nbsp;&nbsp;&nbsp;← IP16<br>
-            └── IP24.xlsx &nbsp;&nbsp;&nbsp;← IP24
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-# Cargar archivos
-with st.spinner("⏳ Cargando datos desde OneDrive..."):
-    raw_av  = fetch_excel(url_av,  "Avisos")  if url_av  else None
-    raw_ord = fetch_excel(url_ord, "Ordenes") if url_ord else None
-    raw_16  = fetch_excel(url_16,  "IP16")    if url_16  else None
-    raw_24  = fetch_excel(url_24,  "IP24")    if url_24  else None
-
-df_ord  = process_ordenes(raw_ord) if raw_ord is not None else pd.DataFrame()
-df_av   = process_avisos(raw_av)   if raw_av  is not None else pd.DataFrame()
-df_ip16 = raw_16 if raw_16 is not None else pd.DataFrame()
-df_ip24 = process_ip24(raw_24)     if raw_24  is not None else pd.DataFrame()
-
-# Status sidebar
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("## ⚙️ Panel de Control")
     st.markdown("---")
-    st.markdown("#### 📊 Estado")
-    for lbl2, df2 in [("🔧 Órdenes",df_ord),("🔔 Avisos",df_av),("📋 IP16",df_ip16),("📅 IP24",df_ip24)]:
-        if not df2.empty:
-            st.success(f"{lbl2}: {len(df2):,}")
-        elif any_url:
-            st.error(f"{lbl2}: error")
+
+    if st.button("🔄 Forzar actualización", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    st.caption(f"📅 {datetime.datetime.today().strftime('%d/%m/%Y %H:%M')}")
+    st.caption("Cache: 5 minutos automático")
+    st.markdown("---")
+
+# ── CARGAR DATOS ──────────────────────────────────────────────────────────────
+with st.spinner("⏳ Cargando datos desde OneDrive..."):
+    raw = {k: fetch_excel(k, v) for k, v in LINKS.items()}
+
+# Mostrar estado en sidebar
+with st.sidebar:
+    st.markdown("#### 📊 Estado de archivos")
+    for k, df2 in raw.items():
+        if df2 is not None:
+            st.success(f"✅ {k}: {len(df2):,} filas")
+        else:
+            st.error(f"❌ {k}: no cargado")
+
+# Procesar
+df_ord  = process_ordenes(raw["Ordenes"]) if raw["Ordenes"] is not None else pd.DataFrame()
+df_av   = process_avisos(raw["Avisos"])   if raw["Avisos"]  is not None else pd.DataFrame()
+df_ip16 = raw["IP16"] if raw["IP16"] is not None else pd.DataFrame()
+df_ip24 = process_ip24(raw["IP24"])       if raw["IP24"]    is not None else pd.DataFrame()
 
 if df_ord.empty and df_av.empty:
-    st.error("❌ No se cargó ningún archivo. Verifica que los links estén compartidos como 'Cualquier persona con el vínculo'.")
-    st.stop()
+    st.error("""❌ No se pudo cargar ningún archivo desde OneDrive.
+
+**Posibles causas:**
+- Los links expiraron → genera links nuevos desde OneDrive
+- El archivo de GitHub no tiene los links actualizados
+
+**Solución temporal:** Usa el uploader manual de abajo 👇""")
+
+    st.markdown("### 📁 Carga manual (alternativa)")
+    col1, col2 = st.columns(2)
+    with col1:
+        f_ord = st.file_uploader("🔧 Ordenes.xlsx", type=["xlsx","xls"])
+        f_av  = st.file_uploader("🔔 Avisos.xlsx",  type=["xlsx","xls"])
+    with col2:
+        f_16  = st.file_uploader("📋 IP16.xlsx",    type=["xlsx","xls"])
+        f_24  = st.file_uploader("📅 IP24.xlsx",    type=["xlsx","xls"])
+
+    if f_ord: df_ord  = process_ordenes(pd.read_excel(f_ord, dtype=str))
+    if f_av:  df_av   = process_avisos(pd.read_excel(f_av, dtype=str))
+    if f_16:  df_ip16 = pd.read_excel(f_16, dtype=str)
+    if f_24:  df_ip24 = process_ip24(pd.read_excel(f_24))
+
+    if df_ord.empty and df_av.empty:
+        st.stop()
 
 # ── FILTROS ───────────────────────────────────────────────────────────────────
 emp_filter = ""
@@ -279,8 +270,8 @@ with tab1:
         if emp_filter=="2002-ALIM.SELEC" and not sub_filter:
             st.markdown('<div class="section-title" style="background:#b45309">📍 ALIM. SELEC — Por Locación</div>', unsafe_allow_html=True)
             sub_g=df_ord[df_ord["Empresa"]=="2002-ALIM.SELEC"].groupby("SubUbi")
-            cols_s=st.columns(max(len(sub_g),1))
-            for i,(ubi,grp) in enumerate(sub_g):
+            cols_s=st.columns(max(len(list(sub_g)),1))
+            for i,(ubi,grp) in enumerate(df_ord[df_ord["Empresa"]=="2002-ALIM.SELEC"].groupby("SubUbi")):
                 ej=len(grp[grp["Status"].isin(["Concluida","Cerrada"])]); p=ej/len(grp)*100 if len(grp) else 0
                 with cols_s[i]:
                     st.markdown(f"**📍 {ubi}**")
@@ -330,7 +321,7 @@ with tab1:
 # ════════ TAB 2: AVISOS ════════
 with tab2:
     if df_av.empty:
-        st.info("Configura el link de Avisos.xlsx en el panel lateral.")
+        st.info("No se cargaron avisos.")
     else:
         av_t=len(df_av); av_ab=len(df_av[df_av["StatusSimple"]=="Abierto"])
         av_tr=len(df_av[df_av["StatusSimple"]=="En Tratamiento"]); av_co=len(df_av[df_av["StatusSimple"]=="Concluido"])
@@ -344,7 +335,7 @@ with tab2:
 # ════════ TAB 3: ÓRDENES ════════
 with tab3:
     if df_f.empty:
-        st.info("Configura el link de Ordenes.xlsx en el panel lateral.")
+        st.info("No se cargaron órdenes.")
     else:
         o_t=len(df_f); o_ab=len(df_f[df_f["Status"]=="Abierta"]); o_lb=len(df_f[df_f["Status"]=="Liberada"])
         o_ct=len(df_f[df_f["Status"]=="Concluida"]); o_ce=len(df_f[df_f["Status"]=="Cerrada"])
@@ -361,7 +352,7 @@ with tab3:
 # ════════ TAB 4: PREVENTIVO ════════
 with tab4:
     if df_f.empty:
-        st.info("Configura el link de Ordenes.xlsx en el panel lateral.")
+        st.info("No se cargaron órdenes.")
     else:
         prev=df_f[df_f["Tipo"]=="Preventivo"]; pr_t=len(prev)
         pr_ej=len(prev[prev["Status"].isin(["Concluida","Cerrada"])]); pr_pct=pr_ej/pr_t*100 if pr_t else 0
@@ -390,7 +381,7 @@ with tab4:
 # ════════ TAB 5: CORRECTIVO ════════
 with tab5:
     if df_f.empty:
-        st.info("Configura el link de Ordenes.xlsx en el panel lateral.")
+        st.info("No se cargaron órdenes.")
     else:
         corr=df_f[df_f["Tipo"]=="Correctivo"]; co_t=len(corr)
         co_ej=len(corr[corr["Status"].isin(["Concluida","Cerrada"])]); co_pct=co_ej/co_t*100 if co_t else 0
@@ -419,7 +410,7 @@ with tab5:
 # ════════ TAB 6: PLANES PM ════════
 with tab6:
     if df_ip16.empty or df_ip24.empty:
-        st.info("Configura los links de IP16.xlsx e IP24.xlsx en el panel lateral.")
+        st.info("No se cargaron los archivos IP16 / IP24.")
     else:
         pl_t=len(df_ip16); po_t=len(df_ip24)
         po_con=len(df_ip24[df_ip24["ConOrden"]==True]); po_sin=po_t-po_con
